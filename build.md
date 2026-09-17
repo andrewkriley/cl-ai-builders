@@ -93,8 +93,25 @@ GEMINI_API_KEY=<your key>       # if using Gemini
 
 ## 7. Create a virtual environment and install dependencies
 
+A venv doesn't install Python for you — it just wraps whatever `python3`
+already resolves to on your machine. Check that's 3.11+ first:
+
 ```
-python3 -m venv .venv
+python3 --version
+```
+
+If it's older than 3.11 (common on macOS, where the system `python3` is
+often 3.9), install a current one before creating the venv:
+
+```
+brew install python@3.11          # macOS
+```
+
+Then create the venv with that specific interpreter (safer than the bare
+`python3` if you have more than one Python installed):
+
+```
+python3.11 -m venv .venv
 source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -153,6 +170,11 @@ If it returns real results from your Splunk instance, you're ready to build.
 
 ## Troubleshooting
 
+- **`pip install -r requirements.txt` fails with `Could not find a version
+  that satisfies the requirement mcp`** — your venv was created with Python
+  <3.10 (`mcp` requires 3.10+). Check with `.venv/bin/python3 --version`,
+  then delete and recreate `.venv` using a 3.11+ interpreter as shown in
+  [step 7](#7-create-a-virtual-environment-and-install-dependencies).
 - **Not sure what's missing from `.env`** — run `python scripts/check_env.py`
   for a full readiness report (LLM key/provider match, Galileo, Splunk MCP).
 - **`scripts/setup_mcp.py` reports missing env vars** — double check `.env`
