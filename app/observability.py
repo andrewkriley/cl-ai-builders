@@ -30,25 +30,34 @@ def _galileo_session_id(conversation_id: str) -> str:
     return _galileo_sessions[conversation_id]
 
 
+OPENAI_MODEL = "gpt-4o"
+ANTHROPIC_MODEL = "claude-sonnet-5"
+GEMINI_MODEL = "gemini-3.6-flash"
+
+
 def call_openai(messages: list[dict], tools: list[dict], system_prompt: str):
     from galileo.openai import openai  # auto-logs every call, no decorator needed
 
     client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     full_messages = [{"role": "system", "content": system_prompt}, *messages]
     # `name` is captured by Galileo's wrapper for the span label and stripped
-    # before the real API call — it's not forwarded to OpenAI.
+    # before the real API call — it's not forwarded to OpenAI. The wrapper
+    # already reads `model` from these same kwargs for the span's model field.
     return client.chat.completions.create(
-        model="gpt-4o", messages=full_messages, tools=tools or None, name="openai"
+        model=OPENAI_MODEL, messages=full_messages, tools=tools or None, name="openai"
     )
 
 
-@log(span_type="llm", name="anthropic")
+# @log(span_type="llm") leaves the span's model field blank unless told
+# otherwise — `params={"model": ...}` is how you supply it (the OpenAI
+# wrapper above gets this for free from its own call kwargs).
+@log(span_type="llm", name="anthropic", params={"model": ANTHROPIC_MODEL})
 def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
     from anthropic import Anthropic
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     return client.messages.create(
-        model="claude-sonnet-5",
+        model=ANTHROPIC_MODEL,
         max_tokens=1024,
         system=system_prompt,
         messages=messages,
@@ -56,7 +65,7 @@ def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
     )
 
 
-@log(span_type="llm", name="gemini")
+@log(span_type="llm", name="gemini", params={"model": GEMINI_MODEL})
 def call_gemini(contents: list, tools: list[dict], system_prompt: str):
     from google import genai
     from google.genai import types
@@ -66,7 +75,7 @@ def call_gemini(contents: list, tools: list[dict], system_prompt: str):
         system_instruction=system_prompt,
         tools=[types.Tool(function_declarations=tools)] if tools else None,
     )
-    return client.models.generate_content(model="gemini-3.6-flash", contents=contents, config=config)
+    return client.models.generate_content(model=GEMINI_MODEL, contents=contents, config=config)
 
 
 @log(span_type="tool")
