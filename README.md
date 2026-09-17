@@ -56,21 +56,18 @@ through these MCP tools (confirmed live against a workshop instance):
   plain-English question to SPL (or explaining/optimizing SPL you already
   have)
 
-The indexes with actual data in them:
+The two indexes this workshop is built around:
 
 | Index | Events | What's in it |
 |---|---|---|
 | `oidemo` | ~109k | IT/datacenter operations telemetry — PDU power draw (`Amps`/`Volts`/`W`), CRAC cooling unit temperatures (Kepware sourcetype), plus Windows/Exchange Perfmon counters |
 | `oidemo_notable` | ~2.8k | Splunk Enterprise Security **notable events** correlated to the above — brute-force login attempts, insecure/cleartext auth failures, expired-identity activity, audit-log-cleared events |
-| `main` | ~12.8k | General default-index sample data |
-| `f1_track_records_2025` | 30 | Small sample dataset (F1 track records) |
 
-`oidemo` + `oidemo_notable` are the most useful pair for the workshop's chat
-agent — one is raw infrastructure telemetry, the other is the correlated
-security-alert layer on top of it, so questions like "any high-severity
-notables in the last 30 days, and what infra were they near?" have real,
-connected data to answer from. Try asking your AI harness (once MCP is wired
-up in [step 9](./build.md)) something like:
+`oidemo` is raw infrastructure telemetry and `oidemo_notable` is the
+correlated security-alert layer on top of it, so questions like "any
+high-severity notables in the last 30 days, and what infra were they near?"
+have real, connected data to answer from. Try asking your AI harness (once
+MCP is wired up in [step 9](./build.md)) something like:
 
 > "Run an SPL search against index=oidemo_notable for high severity events,
 > then check oidemo for related PDU or cooling activity around the same
@@ -78,10 +75,24 @@ up in [step 9](./build.md)) something like:
 
 ## Prerequisites
 
-- Python 3.11+
-- git
-- Node.js/npx — your AI harness connects to Splunk MCP through the
-  `mcp-remote` proxy, run on demand via `npx`
+### On your workstation
+
+What you need installed and runnable locally before you start:
+
+- **Python 3.11+** (`python3 --version`)
+- **git**
+- **Node.js/npx** (`node --version`) — your AI harness connects to Splunk MCP
+  through the `mcp-remote` proxy, run on demand via `npx`, no separate
+  install needed
+- **An AI coding harness** (e.g. Claude Code) — used to drive the bootstrap
+  steps and, once MCP is wired up, to query Splunk MCP tools directly
+- A terminal and a text editor
+
+Nothing else needs to be running ahead of time — `build.md` walks you through
+creating a Python virtual environment and installing the rest.
+
+### Accounts & keys
+
 - A [Galileo](https://app.galileo.ai/sign-up) account (free to sign up)
 - Your own Anthropic, OpenAI, or Gemini API key (**not** a subscription tool
   like Claude Code/Claude.ai or Cursor/ChatGPT Plus — the app needs a key it
