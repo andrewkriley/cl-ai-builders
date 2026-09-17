@@ -3,9 +3,14 @@
 Each loop repeats: call the LLM with the Splunk MCP tools available -> if it
 asks for a tool call, run it via observability.call_splunk_tool (a Galileo
 `tool` span) and feed the result back -> otherwise return its final text.
+
+The LLM calls run synchronously in-line (not via asyncio.to_thread) on
+purpose: Galileo's logger lookup resolves to a different object with no
+active trace inside a to_thread-spawned worker thread, which silently drops
+every LLM span from the trace. Blocking the event loop briefly is an
+acceptable tradeoff for this single-user workshop demo.
 """
 
-import asyncio
 import json
 import os
 
@@ -51,7 +56,7 @@ async def _openai_loop(user_message: str, mcp_tools: list[dict]) -> str:
     messages = [{"role": "user", "content": user_message}]
 
     for _ in range(MAX_TURNS):
-        response = await asyncio.to_thread(observability.call_openai, messages, tools, SYSTEM_PROMPT)
+        response = observability.call_openai(messages, tools, SYSTEM_PROMPT)
         message = response.choices[0].message
         if not message.tool_calls:
             return message.content or ""
@@ -70,7 +75,7 @@ async def _anthropic_loop(user_message: str, mcp_tools: list[dict]) -> str:
     messages = [{"role": "user", "content": user_message}]
 
     for _ in range(MAX_TURNS):
-        response = await asyncio.to_thread(observability.call_anthropic, messages, tools, SYSTEM_PROMPT)
+        response = observability.call_anthropic(messages, tools, SYSTEM_PROMPT)
         tool_uses = [block for block in response.content if block.type == "tool_use"]
         if not tool_uses:
             return "".join(block.text for block in response.content if block.type == "text")
@@ -94,7 +99,7 @@ async def _gemini_loop(user_message: str, mcp_tools: list[dict]) -> str:
     contents = [types.Content(role="user", parts=[types.Part.from_text(text=user_message)])]
 
     for _ in range(MAX_TURNS):
-        response = await asyncio.to_thread(observability.call_gemini, contents, tools, SYSTEM_PROMPT)
+        response = observability.call_gemini(contents, tools, SYSTEM_PROMPT)
         calls = response.function_calls or []
         if not calls:
             return response.text or ""
