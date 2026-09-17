@@ -16,7 +16,7 @@ import os
 
 from app import observability
 
-MAX_TURNS = 5
+MAX_TURNS = 8
 
 SYSTEM_PROMPT = """\
 You are an AI assistant helping a workshop participant explore their Splunk \
@@ -27,8 +27,10 @@ Known indexes on this instance:
 Windows/Exchange Perfmon counters).
 - oidemo_notable: Splunk Enterprise Security notable events (security \
 alerts) correlated to oidemo. Use this index for anything about security, \
-notables, brute force, authentication failures, or audit events.
-- main: general default-index sample data.
+notables, brute force, authentication failures, or audit events. This data \
+is sourcetype=stash: fields like severity aren't cleanly extracted — search \
+for the literal uppercase string, e.g. "severity=HIGH" (not severity=high), \
+as a raw text match rather than a field filter.
 
 Prefer splunk_run_query with explicit SPL (e.g. `search index=oidemo_notable \
 ...`) over the saia_* tools — they call out to a separate AI Assistant \
