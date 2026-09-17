@@ -35,10 +35,14 @@ def call_openai(messages: list[dict], tools: list[dict], system_prompt: str):
 
     client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     full_messages = [{"role": "system", "content": system_prompt}, *messages]
-    return client.chat.completions.create(model="gpt-4o", messages=full_messages, tools=tools or None)
+    # `name` is captured by Galileo's wrapper for the span label and stripped
+    # before the real API call — it's not forwarded to OpenAI.
+    return client.chat.completions.create(
+        model="gpt-4o", messages=full_messages, tools=tools or None, name="openai"
+    )
 
 
-@log(span_type="llm")
+@log(span_type="llm", name="anthropic")
 def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
     from anthropic import Anthropic
 
@@ -52,7 +56,7 @@ def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
     )
 
 
-@log(span_type="llm")
+@log(span_type="llm", name="gemini")
 def call_gemini(contents: list, tools: list[dict], system_prompt: str):
     from google import genai
     from google.genai import types
