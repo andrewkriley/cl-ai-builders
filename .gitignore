@@ -1,0 +1,13 @@
+# Secrets / local config
+.env
+.mcp.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store

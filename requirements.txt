@@ -1,0 +1,10 @@
+python-dotenv
+mcp
+galileo
+
+# --- added when the chat app is built ---
+fastapi
+uvicorn
+anthropic
+openai
+google-genai
