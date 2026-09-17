@@ -220,3 +220,14 @@ client, Galileo tracing, chat UI).
 - **No traces show up in the Galileo dashboard** — confirm `GALILEO_API_KEY`
   and `GALILEO_PROJECT` are set, and that the app actually ran a turn (traces
   only appear after a completed request).
+- **Metrics (e.g. `groundedness`, `tool_selection_quality`) stay stuck on
+  "queued"/"pending" on every trace, even old ones** — this isn't caused by
+  the app or `.env`. Confirmed via the Galileo API: the account's scoring
+  integration (Settings → Integrations) shows green/healthy, and every trace
+  correctly has both metrics attached, but the scoring jobs never complete
+  regardless of how long you wait. This points to a Galileo backend issue
+  (stuck scoring queue, or automated scoring throttled on some account
+  tiers), not something fixable from this repo. It doesn't block the
+  workshop — traces, spans, and sessions all log and display correctly;
+  only the auto-computed quality scores are affected. If it matters for your
+  session, check Galileo's status page or contact their support.
