@@ -28,21 +28,32 @@ it connects directly.
 - **`agent.py`** — one tool-calling loop per `LLM_PROVIDER`
   (anthropic/openai/gemini): call the LLM with the Splunk MCP tools on offer,
   execute whatever tool call it asks for, feed the result back, repeat until
-  it returns a final answer (capped at 5 rounds). The LLM calls run in-line
-  rather than via `asyncio.to_thread` — Galileo's logger lookup silently
-  loses the active trace inside a thread-pool worker, so this briefly blocks
-  the event loop as a deliberate tradeoff for a single-user demo.
+  it returns a final answer (capped at 8 rounds — `oidemo_notable` is
+  `sourcetype=stash`, where `severity` is embedded as literal uppercase text
+  like `severity=HIGH` rather than a normalized field, so the model
+  sometimes needs a few rounds to rediscover the right query shape; the
+  system prompt now warns it up front, but the cap has headroom regardless).
+  The LLM calls run in-line rather than via `asyncio.to_thread` — Galileo's
+  logger lookup silently loses the active trace inside a thread-pool worker,
+  so this briefly blocks the event loop as a deliberate tradeoff for a
+  single-user demo.
 - **`observability.py`** — OpenAI calls go through Galileo's native
-  `galileo.openai` wrapper (auto-logs, no decorator needed). Anthropic and
-  Gemini calls, and every Splunk MCP tool call, use Galileo's
-  `@log(span_type=...)` decorator instead, since no native wrapper exists for
-  those. `run_traced_turn` maps each `conversation_id` to a Galileo session
-  (created once via `start_session`, cached), explicitly calls
-  `start_trace(input=user_message)` / `conclude(output=result)` so the trace
-  shows the real question and answer rather than an arbitrary child span's
-  input/output, and wraps it all in one `galileo_context(session_id=...)` so
-  every LLM/tool span from that turn lands in one trace, and every turn in
-  the conversation lands in one session.
+  `galileo.openai` wrapper (auto-logs, no decorator needed), passing
+  `name="openai"` so its spans are labeled by provider instead of the
+  wrapper's generic default (`"llm"`) — that kwarg is captured by Galileo
+  for the span label and stripped before the real API call, never sent to
+  OpenAI. Anthropic and Gemini calls, and every Splunk MCP tool call, use
+  Galileo's `@log(span_type=..., name=...)` decorator instead, since no
+  native wrapper exists for those — `name="anthropic"`/`name="gemini"` for
+  the same reason (otherwise `@log` defaults the span name to the Python
+  function name, e.g. `call_anthropic`). `run_traced_turn` maps each
+  `conversation_id` to a Galileo session (created once via `start_session`,
+  cached), explicitly calls `start_trace(input=user_message)` /
+  `conclude(output=result)` so the trace shows the real question and answer
+  rather than an arbitrary child span's input/output, and wraps it all in
+  one `galileo_context(session_id=...)` so every LLM/tool span from that
+  turn lands in one trace, and every turn in the conversation lands in one
+  session.
 
 If you're building your own version instead of using this one, this is the
 same build order: MCP client → LLM adapter/agent loop → Galileo tracing →
