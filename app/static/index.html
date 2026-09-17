@@ -44,6 +44,19 @@
     color: var(--text-dim);
     margin-top: 0.15rem;
   }
+  header .titles { flex: 1; }
+  #provider {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.82rem;
+  }
+  #provider:focus {
+    outline: none;
+    border-color: var(--green-bright);
+  }
   #log {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -148,10 +161,13 @@
     <path d="M32 44 L32 58" stroke="#65a637" stroke-width="3" stroke-linecap="round"/>
     <path d="M32 52 L26 56" stroke="#65a637" stroke-width="3" stroke-linecap="round"/>
   </svg>
-  <div>
+  <div class="titles">
     <h1>Buttercup Games — AI Ops Assistant</h1>
     <div class="subtitle">Splunk MCP &middot; Cisco Live AI Builders Workshop</div>
   </div>
+  <select id="provider" title="LLM provider" disabled>
+    <option>Loading...</option>
+  </select>
 </header>
 
 <div id="log"></div>
@@ -165,7 +181,31 @@
 const log = document.getElementById("log");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("message");
+const providerSelect = document.getElementById("provider");
 const conversationId = crypto.randomUUID(); // one Galileo session per page load
+
+const PROVIDER_LABELS = { anthropic: "Anthropic", openai: "OpenAI", gemini: "Gemini" };
+
+async function loadProviders() {
+  try {
+    const response = await fetch("/config");
+    if (!response.ok) throw new Error(`Server returned ${response.status}`);
+    const { providers, default_provider } = await response.json();
+    providerSelect.innerHTML = "";
+    for (const provider of providers) {
+      const option = document.createElement("option");
+      option.value = provider;
+      option.textContent = PROVIDER_LABELS[provider] || provider;
+      if (provider === default_provider) option.selected = true;
+      providerSelect.appendChild(option);
+    }
+    providerSelect.disabled = false;
+  } catch (err) {
+    providerSelect.innerHTML = '<option value="">unavailable</option>';
+    addMessage("assistant", `Could not load configured LLM providers: ${err.message}`);
+  }
+}
+loadProviders();
 
 function addMessage(role, text) {
   const wrapper = document.createElement("div");
@@ -195,7 +235,7 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, conversation_id: conversationId }),
+      body: JSON.stringify({ message, conversation_id: conversationId, provider: providerSelect.value || null }),
     });
     if (!response.ok) throw new Error(`Server returned ${response.status}`);
     const data = await response.json();

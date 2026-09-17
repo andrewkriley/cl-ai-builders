@@ -14,10 +14,16 @@ it connects directly.
 
 ## How it's built
 
-- **`main.py`** — FastAPI app. `GET /` serves `static/index.html`; `POST
-  /chat` takes `{"message": "...", "conversation_id": "..."}` and returns
-  `{"reply": "..."}`.
-- **`static/index.html`** — a minimal HTML/JS chat page, no build step.
+- **`main.py`** — FastAPI app. `GET /` serves `static/index.html`; `GET
+  /config` returns `{"providers": [...], "default_provider": "..."}` — only
+  providers with an API key set in `.env` are listed; `POST /chat` takes
+  `{"message": "...", "conversation_id": "...", "provider": "..."}` (provider
+  optional, falls back to `LLM_PROVIDER`) and returns `{"reply": "..."}`. An
+  unconfigured `provider` is rejected with `400`, not a crash.
+- **`static/index.html`** — a minimal HTML/JS chat page, no build step. A
+  provider dropdown in the header is populated from `/config` (so it never
+  offers a provider with no key) and sent with every message, letting you
+  switch anthropic/openai/gemini per turn without restarting the app.
   Generates a random `conversation_id` once per page load and sends it with
   every message, so a reload starts a fresh Galileo session.
 - **`mcp_client.py`** — connects to the Splunk MCP server at

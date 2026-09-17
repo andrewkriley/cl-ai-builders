@@ -10,7 +10,8 @@ A small web app with a chat interface, backed by an AI agent that:
 
 1. Takes a user's question in the chat UI.
 2. Calls an LLM API (Anthropic, OpenAI, or Gemini — your own key) to reason
-   about the question.
+   about the question. A dropdown in the chat UI switches between whichever
+   of the three you have a key for, per turn.
 3. Lets the LLM call tools exposed by a **Splunk MCP server** to query your
    Splunk instance for the data it needs.
 4. Traces each turn (prompts, tool calls, responses) to **Galileo** for

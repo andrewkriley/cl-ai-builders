@@ -41,8 +41,8 @@ Be concise and cite concrete numbers or index names from the tool results \
 in your answer."""
 
 
-async def run_agent_turn(user_message: str, mcp_tools: list[dict]) -> str:
-    provider = os.environ.get("LLM_PROVIDER", "anthropic")
+async def run_agent_turn(user_message: str, mcp_tools: list[dict], provider: str | None = None) -> str:
+    provider = provider or os.environ.get("LLM_PROVIDER", "anthropic")
     if provider == "openai":
         return await _openai_loop(user_message, mcp_tools)
     if provider == "gemini":

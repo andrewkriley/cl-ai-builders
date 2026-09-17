@@ -74,7 +74,7 @@ async def call_splunk_tool(tool_name: str, arguments: dict) -> str:
     return await mcp_client.call_tool(_mcp_session, tool_name, arguments)
 
 
-async def run_traced_turn(user_message: str, conversation_id: str) -> str:
+async def run_traced_turn(user_message: str, conversation_id: str, provider: str | None = None) -> str:
     from app.agent import run_agent_turn
 
     with galileo_context(
@@ -92,7 +92,7 @@ async def run_traced_turn(user_message: str, conversation_id: str) -> str:
         async with mcp_client.splunk_mcp_session() as session:
             set_mcp_session(session)
             tools = await mcp_client.list_splunk_tools(session)
-            result = await run_agent_turn(user_message, tools)
+            result = await run_agent_turn(user_message, tools, provider=provider)
 
         logger.conclude(output=result)
         galileo_context.flush()
