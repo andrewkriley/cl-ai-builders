@@ -91,6 +91,10 @@ OPENAI_API_KEY=<your key>       # if using OpenAI
 GEMINI_API_KEY=<your key>       # if using Gemini
 ```
 
+Got more than one key? Fill in all of them — the chat app has a provider
+dropdown that lets you switch between anthropic/openai/gemini per message,
+without editing `.env` or restarting anything.
+
 ## 7. Create a virtual environment and install dependencies
 
 A venv doesn't install Python for you — it just wraps whatever `python3`
@@ -167,10 +171,13 @@ uvicorn app.main:app --reload
 ```
 
 Open http://127.0.0.1:8000 and ask it something about your Splunk data (see
-[what's available](./README.md#data-available-via-splunk-mcp)). See
-[`app/README.md`](./app/README.md) for how it's built if you want to modify
-it or build your own version from the same pieces (LLM adapter, MCP client,
-Galileo tracing, chat UI).
+[what's available](./README.md#data-available-via-splunk-mcp)). If you filled
+in more than one LLM key, use the provider dropdown in the top-right of the
+chat header to switch between them and compare answers/traces side by side.
+
+See [`app/README.md`](./app/README.md) for how it's built if you want to
+modify it or build your own version from the same pieces (LLM adapter, MCP
+client, Galileo tracing, chat UI).
 
 ## Troubleshooting
 

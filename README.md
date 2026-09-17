@@ -121,9 +121,9 @@ workshop, from cloning the repo through to a running app.
 | `requirements.txt` | Python dependencies |
 | `scripts/check_env.py` | Reports whether your `.env` has everything needed to participate |
 | `scripts/setup_mcp.py` | Derives the Splunk MCP endpoint, verifies it, and wires up `.mcp.json` |
-| `app/main.py` | FastAPI app (`uvicorn app.main:app --reload` to run it) |
+| `app/main.py` | FastAPI app — `/chat`, `/config` (`uvicorn app.main:app --reload` to run it) |
 | `app/agent.py` | Per-provider LLM <-> Splunk MCP tool-calling loop |
 | `app/mcp_client.py` | Splunk MCP connection (self-signed cert handled) |
-| `app/observability.py` | Galileo tracing (native OpenAI wrapper / `@log` decorator) |
-| `app/static/index.html` | The chat UI |
+| `app/observability.py` | Galileo tracing (native OpenAI wrapper / `@log` decorator, sessions) |
+| `app/static/index.html` | The chat UI, with a provider switcher |
 | `.github/workflows/gitleaks.yml` | CI check that scans commits for leaked secrets |
