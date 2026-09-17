@@ -7,8 +7,9 @@ checklist for what it (or your own version) needs to do:
   and renders the responses. No frontend build step required.
 - **Backend**: a FastAPI app exposing a chat endpoint.
 - **MCP client**: uses the `mcp` Python SDK to connect to the Splunk MCP
-  server (`SPLUNK_MCP_URL` / `SPLUNK_MCP_TOKEN` / `SPLUNK_MCP_TRANSPORT` from
-  `.env`) and list/call its tools.
+  server at `<SPLUNK_INSTANCE_URL>:8089/services/mcp` (see
+  `scripts/setup_mcp.py` for how that URL is derived), authenticating with
+  `SPLUNK_MCP_TOKEN`, and list/call its tools.
 - **LLM adapter**: switches between Anthropic, OpenAI, and Gemini based on
   `LLM_PROVIDER`, running the agent loop — send the user message and the
   available Splunk MCP tools to the LLM, execute any tool calls it requests

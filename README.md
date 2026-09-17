@@ -43,12 +43,18 @@ client, Galileo).
 
 - Python 3.11+
 - git
+- Node.js/npx — your AI harness connects to Splunk MCP through the
+  `mcp-remote` proxy, run on demand via `npx`
 - A [Galileo](https://app.galileo.ai/sign-up) account (free to sign up)
 - Your own Anthropic, OpenAI, or Gemini API key (**not** a subscription tool
-  like Claude Code/Claude.ai or Cursor/ChatGPT Plus — the app needs a billed
-  API key it can call directly)
-- A Splunk Cloud login, Splunk MCP token, and MCP server URL — **provided by
-  the workshop facilitator** at the start of the session
+  like Claude Code/Claude.ai or Cursor/ChatGPT Plus — the app needs a key it
+  can call directly). No key yet? [Google's Gemini API has a free tier](https://ai.google.dev/gemini-api/docs/pricing)
+  with free input/output tokens on several models — the quickest way to get
+  one. Use a plain **gmail.com** account for this, not a legacy/grandfathered
+  Google Workspace account — those can land on a Cloud project that's denied
+  access to free-tier calls.
+- A Splunk Cloud login and Splunk MCP token — **provided by the workshop
+  facilitator** at the start of the session
 
 ## Getting started
 
@@ -62,6 +68,7 @@ workshop, from cloning the repo through to a running app.
 | `build.md` | Step-by-step workshop workflow |
 | `.env.example` | Template for your local `.env` (API keys, tokens) |
 | `requirements.txt` | Python dependencies |
-| `scripts/setup_mcp.py` | Wires up and verifies your Splunk MCP connection |
+| `scripts/check_env.py` | Reports whether your `.env` has everything needed to participate |
+| `scripts/setup_mcp.py` | Derives the Splunk MCP endpoint, verifies it, and wires up `.mcp.json` |
 | `app/` | Where the chat app lives (reference app + your own build) |
 | `.github/workflows/gitleaks.yml` | CI check that scans commits for leaked secrets |

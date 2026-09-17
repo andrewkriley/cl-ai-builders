@@ -43,21 +43,22 @@ GALILEO_LOG_STREAM=default
 The facilitator will hand out, per participant:
 
 - A Splunk Cloud instance URL and login
-- A Splunk MCP server URL and token
+- A Splunk MCP token
 
 Log in to the Splunk Cloud instance in your browser first, to confirm your
 credentials work.
 
-Then fill in the Splunk section of `.env`:
+Then fill in the Splunk section of `.env` — just the base instance URL, no
+port or path:
 
 ```
-SPLUNK_MCP_URL=<url the facilitator gave you>
+SPLUNK_INSTANCE_URL=<base instance URL the facilitator gave you>
 SPLUNK_MCP_TOKEN=<token the facilitator gave you>
-SPLUNK_MCP_TRANSPORT=http
 ```
 
-> `SPLUNK_MCP_TRANSPORT` defaults to `http` — confirm with the facilitator
-> whether your MCP server actually expects `http`, `sse`, or `stdio`.
+`scripts/setup_mcp.py` (step 9) derives the full MCP endpoint for you —
+Splunk's MCP Server for Splunk Platform always serves it at
+`<instance>:8089/services/mcp`.
 
 ## 6. Bring your own LLM API key
 
@@ -65,10 +66,20 @@ Get an API key from **one** of:
 
 - Anthropic: https://console.anthropic.com
 - OpenAI: https://platform.openai.com
-- Gemini: https://aistudio.google.com/apikey
+- Gemini: https://aistudio.google.com/apikey — Google's Gemini API has a free
+  tier with free input/output tokens on several models, so this is the
+  quickest option if you don't already have a billed key. See
+  [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) for
+  which models and rate limits are included.
 
-This must be a billed API key, not a Claude.ai/ChatGPT/Cursor subscription —
-the app calls the API directly and pays per token.
+  > Create this key while signed in with a plain **gmail.com** personal
+  > account. A legacy/grandfathered Google Workspace account can end up on a
+  > Cloud project that's denied access to free-tier generation calls
+  > (`403 PERMISSION_DENIED`) even though the key itself looks valid.
+
+If you go with Anthropic or OpenAI, this must be a billed API key, not a
+Claude.ai/ChatGPT/Cursor subscription — the app calls the API directly and
+pays per token.
 
 Fill in the LLM section of `.env`, setting `LLM_PROVIDER` to match whichever
 key you got:
@@ -95,19 +106,34 @@ delete `.venv/` afterwards to clean up.
 Remember to run `source .venv/bin/activate` again any time you open a new
 terminal for the rest of the workshop.
 
-## 8. Wire up your Splunk MCP connection
+## 8. Check your `.env` is ready
 
-Run the setup script — it reads your `.env` and writes/updates a
-project-scoped `.mcp.json` so your AI harness can see the Splunk MCP tools:
+```
+python scripts/check_env.py
+```
+
+This confirms you have at least one LLM key set and matching `LLM_PROVIDER`,
+a Galileo API key, and a Splunk instance URL + MCP token — before you go any
+further.
+
+## 9. Wire up your Splunk MCP connection
+
+Run the setup script — it derives the full MCP endpoint from
+`SPLUNK_INSTANCE_URL`, does a live connectivity check (listing the server's
+tools), and writes/updates a project-scoped `.mcp.json` so your AI harness
+can use those same tools:
 
 ```
 python scripts/setup_mcp.py
 ```
 
-This also does a live connectivity check against your Splunk MCP server and
-lists the tools it exposes. If it fails, see [Troubleshooting](#troubleshooting).
+This requires Node.js/npx (see [Prerequisites](./README.md#prerequisites)) —
+your AI harness runs the Splunk MCP connection through the `mcp-remote`
+proxy, fetched on demand via `npx`, no separate install needed.
 
-## 9. Check MCP access
+If it fails, see [Troubleshooting](#troubleshooting).
+
+## 10. Check MCP access
 
 Ask your AI harness (e.g. Claude Code) to list the available Splunk MCP tools
 and run a simple query, for example:
@@ -117,7 +143,7 @@ and run a simple query, for example:
 
 If it returns real results from your Splunk instance, you're ready to build.
 
-## 10. Build or run the app
+## 11. Build or run the app
 
 - **Just want it running:** see [`app/README.md`](./app/README.md) for the
   reference app.
@@ -127,15 +153,30 @@ If it returns real results from your Splunk instance, you're ready to build.
 
 ## Troubleshooting
 
+- **Not sure what's missing from `.env`** — run `python scripts/check_env.py`
+  for a full readiness report (LLM key/provider match, Galileo, Splunk MCP).
 - **`scripts/setup_mcp.py` reports missing env vars** — double check `.env`
-  has `SPLUNK_MCP_URL` and `SPLUNK_MCP_TOKEN` filled in (not left blank from
-  `.env.example`).
-- **MCP connection fails / times out** — confirm `SPLUNK_MCP_TRANSPORT`
-  matches what the facilitator's server actually expects, and that you're on
-  the workshop network/VPN if one is required.
+  has `SPLUNK_INSTANCE_URL` and `SPLUNK_MCP_TOKEN` filled in (not left blank
+  from `.env.example`), and that `SPLUNK_INSTANCE_URL` is just the base URL
+  (no port or path).
+- **MCP connection fails / times out** — confirm you're on the workshop
+  network/VPN if one is required, and that `SPLUNK_INSTANCE_URL` doesn't have
+  a trailing slash or extra path.
+- **SSL/certificate warnings when connecting to Splunk MCP** — expected.
+  Splunk's management port (8089) uses a self-signed certificate by default;
+  `scripts/setup_mcp.py` and the generated `.mcp.json` both disable TLS
+  verification for this one connection on purpose.
+- **`scripts/setup_mcp.py` step works but your AI harness still can't reach
+  Splunk MCP** — confirm Node.js/npx is installed (`node --version`); the
+  generated `.mcp.json` runs the connection through `npx -y mcp-remote`.
 - **LLM API calls fail with an auth error** — check you copied the full key
   with no extra whitespace, and that it's an API key (starts with `sk-ant-`
   for Anthropic, `sk-` for OpenAI, or `AIza` for Gemini), not a session token.
+- **Gemini key works for listing models but every generation call returns
+  `403 PERMISSION_DENIED: "Your project has been denied access"`** — this is
+  a Cloud project access issue, not a bad key. Create a new key at
+  https://aistudio.google.com/apikey while signed in with a plain gmail.com
+  account instead of a legacy/grandfathered Google Workspace account.
 - **No traces show up in the Galileo dashboard** — confirm `GALILEO_API_KEY`
   and `GALILEO_PROJECT` are set, and that the app actually ran a turn (traces
   only appear after a completed request).
