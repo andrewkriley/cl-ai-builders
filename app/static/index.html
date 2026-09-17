@@ -165,6 +165,7 @@
 const log = document.getElementById("log");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("message");
+const conversationId = crypto.randomUUID(); // one Galileo session per page load
 
 function addMessage(role, text) {
   const wrapper = document.createElement("div");
@@ -194,7 +195,7 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, conversation_id: conversationId }),
     });
     if (!response.ok) throw new Error(`Server returned ${response.status}`);
     const data = await response.json();

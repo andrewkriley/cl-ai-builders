@@ -21,6 +21,7 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), na
 
 class ChatRequest(BaseModel):
     message: str
+    conversation_id: str
 
 
 class ChatResponse(BaseModel):
@@ -34,5 +35,5 @@ async def index():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    reply = await run_traced_turn(request.message)
+    reply = await run_traced_turn(request.message, request.conversation_id)
     return ChatResponse(reply=reply)

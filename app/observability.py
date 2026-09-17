@@ -10,16 +10,24 @@ creates the same kind of span manually. Splunk MCP tool calls use
 
 import os
 
-from galileo import galileo_context, log
+from galileo import galileo_context, log, start_session
 
 from app import mcp_client
 
 _mcp_session = None
+_galileo_sessions: dict[str, str] = {}  # conversation_id -> Galileo session_id, so every
+                                          # turn in one browser conversation lands in one session
 
 
 def set_mcp_session(session):
     global _mcp_session
     _mcp_session = session
+
+
+def _galileo_session_id(conversation_id: str) -> str:
+    if conversation_id not in _galileo_sessions:
+        _galileo_sessions[conversation_id] = start_session(name=f"workshop-chat-{conversation_id}")
+    return _galileo_sessions[conversation_id]
 
 
 def call_openai(messages: list[dict], tools: list[dict], system_prompt: str):
@@ -62,12 +70,13 @@ async def call_splunk_tool(tool_name: str, arguments: dict) -> str:
     return await mcp_client.call_tool(_mcp_session, tool_name, arguments)
 
 
-async def run_traced_turn(user_message: str) -> str:
+async def run_traced_turn(user_message: str, conversation_id: str) -> str:
     from app.agent import run_agent_turn
 
     with galileo_context(
         project=os.environ.get("GALILEO_PROJECT", "ai-builders-workshop"),
         log_stream=os.environ.get("GALILEO_LOG_STREAM", "default"),
+        session_id=_galileo_session_id(conversation_id),
     ):
         async with mcp_client.splunk_mcp_session() as session:
             set_mcp_session(session)
