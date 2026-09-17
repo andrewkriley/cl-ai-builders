@@ -39,6 +39,43 @@ the end of the session. If you're comfortable, you're encouraged to build your
 own version from scratch using the same three building blocks (LLM API, MCP
 client, Galileo).
 
+## Data available via Splunk MCP
+
+Each participant's Splunk instance ships with the same demo dataset, exposed
+through these MCP tools (confirmed live against a workshop instance):
+
+- `splunk_get_info`, `splunk_get_indexes`, `splunk_get_index_info` — instance
+  and index metadata
+- `splunk_run_query` — run an arbitrary SPL search and get results back
+- `splunk_get_metadata`, `splunk_get_knowledge_objects`,
+  `splunk_get_kv_store_collections` — field/source/sourcetype metadata and
+  saved knowledge objects
+- `splunk_get_user_list`, `splunk_get_user_info` — Splunk user/role info
+- `saia_generate_spl`, `saia_explain_spl`, `saia_optimize_spl`,
+  `saia_ask_splunk_question` — Splunk AI Assistant helpers for going from a
+  plain-English question to SPL (or explaining/optimizing SPL you already
+  have)
+
+The indexes with actual data in them:
+
+| Index | Events | What's in it |
+|---|---|---|
+| `oidemo` | ~109k | IT/datacenter operations telemetry — PDU power draw (`Amps`/`Volts`/`W`), CRAC cooling unit temperatures (Kepware sourcetype), plus Windows/Exchange Perfmon counters |
+| `oidemo_notable` | ~2.8k | Splunk Enterprise Security **notable events** correlated to the above — brute-force login attempts, insecure/cleartext auth failures, expired-identity activity, audit-log-cleared events |
+| `main` | ~12.8k | General default-index sample data |
+| `f1_track_records_2025` | 30 | Small sample dataset (F1 track records) |
+
+`oidemo` + `oidemo_notable` are the most useful pair for the workshop's chat
+agent — one is raw infrastructure telemetry, the other is the correlated
+security-alert layer on top of it, so questions like "any high-severity
+notables in the last 30 days, and what infra were they near?" have real,
+connected data to answer from. Try asking your AI harness (once MCP is wired
+up in [step 9](./build.md)) something like:
+
+> "Run an SPL search against index=oidemo_notable for high severity events,
+> then check oidemo for related PDU or cooling activity around the same
+> time."
+
 ## Prerequisites
 
 - Python 3.11+
