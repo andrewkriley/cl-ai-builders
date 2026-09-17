@@ -34,10 +34,10 @@ auto-logs every call). Anthropic and Gemini calls — and Splunk MCP tool
 calls — use Galileo's `@log` decorator instead, which produces the same kind
 of trace without a provider-specific wrapper.
 
-A working reference app will be provided so everyone has something running by
-the end of the session. If you're comfortable, you're encouraged to build your
-own version from scratch using the same three building blocks (LLM API, MCP
-client, Galileo).
+A working reference app ships in [`app/`](./app) (`uvicorn app.main:app
+--reload`) so everyone has something running by the end of the session. If
+you're comfortable, you're encouraged to build your own version from scratch
+using the same three building blocks (LLM API, MCP client, Galileo).
 
 ## Data available via Splunk MCP
 
@@ -118,5 +118,9 @@ workshop, from cloning the repo through to a running app.
 | `requirements.txt` | Python dependencies |
 | `scripts/check_env.py` | Reports whether your `.env` has everything needed to participate |
 | `scripts/setup_mcp.py` | Derives the Splunk MCP endpoint, verifies it, and wires up `.mcp.json` |
-| `app/` | Where the chat app lives (reference app + your own build) |
+| `app/main.py` | FastAPI app (`uvicorn app.main:app --reload` to run it) |
+| `app/agent.py` | Per-provider LLM <-> Splunk MCP tool-calling loop |
+| `app/mcp_client.py` | Splunk MCP connection (self-signed cert handled) |
+| `app/observability.py` | Galileo tracing (native OpenAI wrapper / `@log` decorator) |
+| `app/static/index.html` | The chat UI |
 | `.github/workflows/gitleaks.yml` | CI check that scans commits for leaked secrets |

@@ -160,13 +160,17 @@ and run a simple query, for example:
 
 If it returns real results from your Splunk instance, you're ready to build.
 
-## 11. Build or run the app
+## 11. Run the app
 
-- **Just want it running:** see [`app/README.md`](./app/README.md) for the
-  reference app.
-- **Want to build your own:** `app/README.md` also describes the pieces
-  (LLM adapter, MCP client, Galileo tracing, chat UI) so you can build the
-  agent loop yourself.
+```
+uvicorn app.main:app --reload
+```
+
+Open http://127.0.0.1:8000 and ask it something about your Splunk data (see
+[what's available](./README.md#data-available-via-splunk-mcp)). See
+[`app/README.md`](./app/README.md) for how it's built if you want to modify
+it or build your own version from the same pieces (LLM adapter, MCP client,
+Galileo tracing, chat UI).
 
 ## Troubleshooting
 

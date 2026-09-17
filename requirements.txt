@@ -2,8 +2,8 @@ python-dotenv
 requests
 mcp
 galileo
+packaging
 
-# --- added when the chat app is built ---
 fastapi
 uvicorn
 anthropic
