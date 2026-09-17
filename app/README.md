@@ -15,8 +15,11 @@ it connects directly.
 ## How it's built
 
 - **`main.py`** — FastAPI app. `GET /` serves `static/index.html`; `POST
-  /chat` takes `{"message": "..."}` and returns `{"reply": "..."}`.
+  /chat` takes `{"message": "...", "conversation_id": "..."}` and returns
+  `{"reply": "..."}`.
 - **`static/index.html`** — a minimal HTML/JS chat page, no build step.
+  Generates a random `conversation_id` once per page load and sends it with
+  every message, so a reload starts a fresh Galileo session.
 - **`mcp_client.py`** — connects to the Splunk MCP server at
   `<SPLUNK_INSTANCE_URL>:8089/services/mcp` (see `scripts/setup_mcp.py` for
   how that URL is derived) using the `mcp` Python SDK, authenticating with
@@ -25,14 +28,21 @@ it connects directly.
 - **`agent.py`** — one tool-calling loop per `LLM_PROVIDER`
   (anthropic/openai/gemini): call the LLM with the Splunk MCP tools on offer,
   execute whatever tool call it asks for, feed the result back, repeat until
-  it returns a final answer (capped at 5 rounds).
+  it returns a final answer (capped at 5 rounds). The LLM calls run in-line
+  rather than via `asyncio.to_thread` — Galileo's logger lookup silently
+  loses the active trace inside a thread-pool worker, so this briefly blocks
+  the event loop as a deliberate tradeoff for a single-user demo.
 - **`observability.py`** — OpenAI calls go through Galileo's native
   `galileo.openai` wrapper (auto-logs, no decorator needed). Anthropic and
   Gemini calls, and every Splunk MCP tool call, use Galileo's
   `@log(span_type=...)` decorator instead, since no native wrapper exists for
-  those. `run_traced_turn` wraps one whole chat turn in a single
-  `galileo_context(...)`, so every LLM/tool span from that turn lands in one
-  trace.
+  those. `run_traced_turn` maps each `conversation_id` to a Galileo session
+  (created once via `start_session`, cached), explicitly calls
+  `start_trace(input=user_message)` / `conclude(output=result)` so the trace
+  shows the real question and answer rather than an arbitrary child span's
+  input/output, and wraps it all in one `galileo_context(session_id=...)` so
+  every LLM/tool span from that turn lands in one trace, and every turn in
+  the conversation lands in one session.
 
 If you're building your own version instead of using this one, this is the
 same build order: MCP client → LLM adapter/agent loop → Galileo tracing →

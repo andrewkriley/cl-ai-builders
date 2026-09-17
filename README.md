@@ -13,8 +13,10 @@ A small web app with a chat interface, backed by an AI agent that:
    about the question.
 3. Lets the LLM call tools exposed by a **Splunk MCP server** to query your
    Splunk instance for the data it needs.
-4. Traces the whole turn (prompts, tool calls, responses) to **Galileo** for
-   agent observability.
+4. Traces each turn (prompts, tool calls, responses) to **Galileo** for
+   agent observability — every turn in one browser conversation is grouped
+   under a single Galileo session, so a full back-and-forth shows up as one
+   session containing multiple traces, each with its LLM and tool spans.
 
 ```
  Browser (chat UI)
