@@ -78,10 +78,18 @@ async def run_traced_turn(user_message: str, conversation_id: str) -> str:
         log_stream=os.environ.get("GALILEO_LOG_STREAM", "default"),
         session_id=_galileo_session_id(conversation_id),
     ):
+        # Without an explicit start_trace/conclude, Galileo lazily creates the
+        # trace from whichever child span happens to log first — so the trace's
+        # own input/output end up being an arbitrary tool call or LLM message
+        # list instead of the actual user question and final answer.
+        logger = galileo_context.get_logger_instance()
+        logger.start_trace(input=user_message)
+
         async with mcp_client.splunk_mcp_session() as session:
             set_mcp_session(session)
             tools = await mcp_client.list_splunk_tools(session)
             result = await run_agent_turn(user_message, tools)
 
+        logger.conclude(output=result)
         galileo_context.flush()
         return result
