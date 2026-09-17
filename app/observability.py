@@ -22,33 +22,38 @@ def set_mcp_session(session):
     _mcp_session = session
 
 
-def call_openai(messages: list[dict], tools: list[dict]):
+def call_openai(messages: list[dict], tools: list[dict], system_prompt: str):
     from galileo.openai import openai  # auto-logs every call, no decorator needed
 
     client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    return client.chat.completions.create(model="gpt-4o", messages=messages, tools=tools or None)
+    full_messages = [{"role": "system", "content": system_prompt}, *messages]
+    return client.chat.completions.create(model="gpt-4o", messages=full_messages, tools=tools or None)
 
 
 @log(span_type="llm")
-def call_anthropic(messages: list[dict], tools: list[dict]):
+def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
     from anthropic import Anthropic
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     return client.messages.create(
         model="claude-sonnet-5",
         max_tokens=1024,
+        system=system_prompt,
         messages=messages,
         tools=tools or [],
     )
 
 
 @log(span_type="llm")
-def call_gemini(contents: list, tools: list[dict]):
+def call_gemini(contents: list, tools: list[dict], system_prompt: str):
     from google import genai
     from google.genai import types
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    config = types.GenerateContentConfig(tools=[types.Tool(function_declarations=tools)]) if tools else None
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        tools=[types.Tool(function_declarations=tools)] if tools else None,
+    )
     return client.models.generate_content(model="gemini-3.6-flash", contents=contents, config=config)
 
 

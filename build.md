@@ -195,6 +195,13 @@ Galileo tracing, chat UI).
 - **`scripts/setup_mcp.py` step works but your AI harness still can't reach
   Splunk MCP** — confirm Node.js/npx is installed (`node --version`); the
   generated `.mcp.json` runs the connection through `npx -y mcp-remote`.
+- **The chat app says it couldn't fetch data / hit a "server error" for a
+  security-related question** — the `saia_*` tools (`saia_generate_spl`,
+  `saia_ask_splunk_question`, etc.) call a separate Splunk AI Assistant
+  backend on the instance that can return its own `500` errors, independent
+  of this app. The reference agent's system prompt already steers it toward
+  `splunk_run_query` with explicit SPL instead — if you're building your own
+  agent, do the same rather than relying on `saia_*`.
 - **LLM API calls fail with an auth error** — check you copied the full key
   with no extra whitespace, and that it's an API key (starts with `sk-ant-`
   for Anthropic, `sk-` for OpenAI, or `AIza` for Gemini), not a session token.

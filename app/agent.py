@@ -13,6 +13,26 @@ from app import observability
 
 MAX_TURNS = 5
 
+SYSTEM_PROMPT = """\
+You are an AI assistant helping a workshop participant explore their Splunk \
+environment through Splunk MCP tools.
+
+Known indexes on this instance:
+- oidemo: IT/datacenter operations telemetry (PDU power, CRAC cooling, \
+Windows/Exchange Perfmon counters).
+- oidemo_notable: Splunk Enterprise Security notable events (security \
+alerts) correlated to oidemo. Use this index for anything about security, \
+notables, brute force, authentication failures, or audit events.
+- main: general default-index sample data.
+
+Prefer splunk_run_query with explicit SPL (e.g. `search index=oidemo_notable \
+...`) over the saia_* tools — they call out to a separate AI Assistant \
+backend on the Splunk instance that may be unavailable or return server \
+errors, independent of this app.
+
+Be concise and cite concrete numbers or index names from the tool results \
+in your answer."""
+
 
 async def run_agent_turn(user_message: str, mcp_tools: list[dict]) -> str:
     provider = os.environ.get("LLM_PROVIDER", "anthropic")
@@ -31,7 +51,7 @@ async def _openai_loop(user_message: str, mcp_tools: list[dict]) -> str:
     messages = [{"role": "user", "content": user_message}]
 
     for _ in range(MAX_TURNS):
-        response = await asyncio.to_thread(observability.call_openai, messages, tools)
+        response = await asyncio.to_thread(observability.call_openai, messages, tools, SYSTEM_PROMPT)
         message = response.choices[0].message
         if not message.tool_calls:
             return message.content or ""
@@ -50,7 +70,7 @@ async def _anthropic_loop(user_message: str, mcp_tools: list[dict]) -> str:
     messages = [{"role": "user", "content": user_message}]
 
     for _ in range(MAX_TURNS):
-        response = await asyncio.to_thread(observability.call_anthropic, messages, tools)
+        response = await asyncio.to_thread(observability.call_anthropic, messages, tools, SYSTEM_PROMPT)
         tool_uses = [block for block in response.content if block.type == "tool_use"]
         if not tool_uses:
             return "".join(block.text for block in response.content if block.type == "text")
@@ -74,7 +94,7 @@ async def _gemini_loop(user_message: str, mcp_tools: list[dict]) -> str:
     contents = [types.Content(role="user", parts=[types.Part.from_text(text=user_message)])]
 
     for _ in range(MAX_TURNS):
-        response = await asyncio.to_thread(observability.call_gemini, contents, tools)
+        response = await asyncio.to_thread(observability.call_gemini, contents, tools, SYSTEM_PROMPT)
         calls = response.function_calls or []
         if not calls:
             return response.text or ""
