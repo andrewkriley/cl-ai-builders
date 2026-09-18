@@ -239,4 +239,7 @@ client, Galileo tracing, chat UI).
   size, switching to each provider's async client, flushing after every
   span instead of once at the end, and `mode="distributed"` were all tried
   and none fixed it. Purely a Galileo observability gap — the chat app's
-  answers remain correct regardless.
+  answers remain correct regardless. (The async-client attempt was reverted
+  outright, separately from this issue — it broke OpenAI, since
+  `galileo.openai`'s wrapper doesn't patch the async client. The app now
+  uses each provider's sync client, called directly.)

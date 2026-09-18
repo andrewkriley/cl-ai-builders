@@ -59,19 +59,23 @@ GEMINI_MODEL = "gemini-3.6-flash"
 _MAX_LOGGED_TURNS = 6
 
 
-async def call_openai(messages: list[dict], tools: list[dict], system_prompt: str):
+def call_openai(messages: list[dict], tools: list[dict], system_prompt: str):
     from galileo.openai import openai  # auto-logs every call, no decorator needed
 
-    # AsyncOpenAI, not the sync client: avoiding a long blocking call inside
-    # an async function is good practice regardless (doesn't stall other
-    # work on the event loop) — see the KNOWN ISSUE comment above though,
-    # this alone did not turn out to fix the missing-llm-span problem.
-    client = openai.AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    # Sync client on purpose: galileo.openai's wrapper only patches
+    # `openai.resources.chat.completions.Completions.create` (confirmed by
+    # reading its OPENAI_CLIENT_METHODS list) — there's no entry for
+    # AsyncCompletions at all in this installed version. Using AsyncOpenAI
+    # here was tried while chasing an unrelated Anthropic issue and was a
+    # real regression: unpatched, it forwards `name=` straight to the real
+    # API, which rejects it outright (`TypeError: unexpected keyword
+    # argument 'name'`) — confirmed via a live 500 in the running app.
+    client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     full_messages = [{"role": "system", "content": system_prompt}, *messages]
     # `name` is captured by Galileo's wrapper for the span label and stripped
     # before the real API call — it's not forwarded to OpenAI. The wrapper
     # already reads `model` from these same kwargs for the span's model field.
-    return await client.chat.completions.create(
+    return client.chat.completions.create(
         model=OPENAI_MODEL, messages=full_messages, tools=tools or None, name="openai"
     )
 
@@ -98,12 +102,12 @@ def _anthropic_content_to_log(blocks) -> str:
     return "\n".join(parts)
 
 
-async def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
-    from anthropic import AsyncAnthropic
+def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
+    from anthropic import Anthropic
 
-    client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])  # see call_openai's comment on why async
+    client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     start = time.time()
-    response = await client.messages.create(
+    response = client.messages.create(
         model=ANTHROPIC_MODEL,
         # 1024 was too tight: found a real case where a worker's final round
         # (no tool_use, should be the answer text) came back completely
@@ -159,17 +163,17 @@ def _gemini_content_text(content) -> str:
     return "\n".join(_gemini_part_to_text(part) for part in content.parts)
 
 
-async def call_gemini(contents: list, tools: list[dict], system_prompt: str):
+def call_gemini(contents: list, tools: list[dict], system_prompt: str):
     from google import genai
     from google.genai import types
 
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])  # client.aio used below — see call_openai's comment on why async
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         tools=[types.Tool(function_declarations=tools)] if tools else None,
     )
     start = time.time()
-    response = await client.aio.models.generate_content(model=GEMINI_MODEL, contents=contents, config=config)
+    response = client.models.generate_content(model=GEMINI_MODEL, contents=contents, config=config)
 
     # Same reasoning as call_anthropic: log by hand so system_prompt shows up
     # as part of the conversation (Gemini keeps it out of `contents` too) and

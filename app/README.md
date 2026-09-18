@@ -63,24 +63,34 @@ it connects directly.
   turn is visible/filterable in Galileo instead of just a silent fallback
   message in the chat.
 
-  The LLM calls use each provider's async client (`AsyncAnthropic`/
-  `AsyncOpenAI`/`.aio`), awaited in-line rather than run via
-  `asyncio.to_thread` — that's confirmed broken: it resolves Galileo's
-  logger to a different object with no active trace, silently dropping
-  every LLM span.
+  The LLM calls (`call_openai`/`call_anthropic`/`call_gemini`) are plain
+  sync functions, called directly. Two things that look like obvious
+  improvements were tried and both regressed:
+  - `asyncio.to_thread` — confirmed broken: it resolves Galileo's logger to
+    a different object with no active trace, silently dropping every LLM
+    span.
+  - Each provider's async client (`AsyncOpenAI`/`AsyncAnthropic`/`.aio`),
+    awaited in-line — broke OpenAI outright: `galileo.openai`'s wrapper only
+    patches the sync `Completions.create` (confirmed by reading its
+    `OPENAI_CLIENT_METHODS` list), so the async client bypasses it entirely
+    and forwards Galileo's `name=` kwarg straight to the real API, which
+    rejects it (`TypeError: AsyncCompletions.create() got an unexpected
+    keyword argument 'name'` — hit as a live 500 in a running app). It also
+    didn't fix the missing-span issue below for Anthropic/Gemini anyway.
+  Calling them synchronously blocks the event loop for the duration of each
+  request — an acceptable tradeoff for this single-user demo.
 
-  **Known unresolved issue:** even with the async client, a real multi-round
-  conversation still tends to lose most (not all) `llm` spans in Galileo —
-  every `tool` span and the trace's own input/output are unaffected, and
-  this is purely an observability gap, not a functional bug (the chat
-  app's answers are correct regardless). Extensively investigated —
-  bounding the logged payload size, switching sync→async clients, flushing
-  after every span instead of once at the end, and `mode="distributed"`
-  were all tried and none fixed it, while several fabricated-data
-  reproductions using the identical code path never reproduced it at all.
-  See the `KNOWN ISSUE` comment in `observability.py` for the full trail. If
-  you see this during the workshop, it's not something wrong with your
-  setup.
+  **Known unresolved issue:** a real multi-round conversation still tends to
+  lose most (not all) `llm` spans in Galileo — every `tool` span and the
+  trace's own input/output are unaffected, and this is purely an
+  observability gap, not a functional bug (the chat app's answers are
+  correct regardless). Extensively investigated — bounding the logged
+  payload size, the async-client attempt above, flushing after every span
+  instead of once at the end, and `mode="distributed"` were all tried and
+  none fixed it, while several fabricated-data reproductions using the
+  identical code path never reproduced it at all. See the `KNOWN ISSUE`
+  comment in `observability.py` for the full trail. If you see this during
+  the workshop, it's not something wrong with your setup.
 - **`observability.py`** — OpenAI calls go through Galileo's native
   `galileo.openai` wrapper (auto-logs, no decorator needed), passing
   `name="openai"` so its spans are labeled by provider instead of the

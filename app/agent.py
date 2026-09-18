@@ -25,11 +25,18 @@ Either one tripping sets status_code=1 on the worker's agent span when it
 concludes, so a stuck turn is visible/filterable in Galileo rather than
 just a silent fallback message in the chat.
 
-The LLM calls use each provider's async client (AsyncAnthropic/AsyncOpenAI/
-`.aio`), awaited in-line rather than run via asyncio.to_thread — the latter
-is confirmed broken: it resolves Galileo's logger to a different object
-with no active trace, silently dropping every LLM span. See the KNOWN ISSUE
-comment in observability.py: even with the async client, a real multi-round
+The LLM calls (call_openai/call_anthropic/call_gemini) are plain sync
+functions, called directly — not via asyncio.to_thread (confirmed broken:
+resolves Galileo's logger to a different object with no active trace,
+silently dropping every LLM span) and not via each provider's async client
+either (tried while chasing the KNOWN ISSUE below; broke OpenAI outright,
+since galileo.openai's wrapper only patches the sync client — confirmed via
+a live 500: `AsyncCompletions.create() got an unexpected keyword argument
+'name'` — and didn't fix the issue for Anthropic/Gemini anyway). Calling
+them synchronously blocks the event loop for the duration of each request,
+an acceptable tradeoff for this single-user demo.
+
+See the KNOWN ISSUE comment in observability.py: a real multi-round
 conversation still tends to lose most (not all) `llm` spans in Galileo —
 every `tool` span and the trace's own input/output are unaffected, and this
 has not been root-caused despite extensive investigation. It's an
@@ -171,15 +178,15 @@ async def _synthesize(user_message: str, worker_results: dict[str, str], provide
     prompt = f"Original question: {user_message}\n\n{findings}"
 
     if provider == "openai":
-        response = await observability.call_openai([{"role": "user", "content": prompt}], [], SYNTHESIS_SYSTEM_PROMPT)
+        response = observability.call_openai([{"role": "user", "content": prompt}], [], SYNTHESIS_SYSTEM_PROMPT)
         return response.choices[0].message.content or findings
     if provider == "gemini":
         from google.genai import types
 
         contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
-        response = await observability.call_gemini(contents, [], SYNTHESIS_SYSTEM_PROMPT)
+        response = observability.call_gemini(contents, [], SYNTHESIS_SYSTEM_PROMPT)
         return response.text or findings
-    response = await observability.call_anthropic([{"role": "user", "content": prompt}], [], SYNTHESIS_SYSTEM_PROMPT)
+    response = observability.call_anthropic([{"role": "user", "content": prompt}], [], SYNTHESIS_SYSTEM_PROMPT)
     return "".join(block.text for block in response.content if block.type == "text") or findings
 
 
@@ -192,7 +199,7 @@ async def _openai_loop(user_message: str, mcp_tools: list[dict], system_prompt: 
     seen_calls: set[tuple[str, str]] = set()
 
     for _ in range(MAX_TURNS):
-        response = await observability.call_openai(messages, tools, system_prompt)
+        response = observability.call_openai(messages, tools, system_prompt)
         message = response.choices[0].message
         if not message.tool_calls:
             if not message.content:
@@ -219,7 +226,7 @@ async def _anthropic_loop(user_message: str, mcp_tools: list[dict], system_promp
     seen_calls: set[tuple[str, str]] = set()
 
     for _ in range(MAX_TURNS):
-        response = await observability.call_anthropic(messages, tools, system_prompt)
+        response = observability.call_anthropic(messages, tools, system_prompt)
         tool_uses = [block for block in response.content if block.type == "tool_use"]
         if not tool_uses:
             text = "".join(block.text for block in response.content if block.type == "text")
@@ -252,7 +259,7 @@ async def _gemini_loop(user_message: str, mcp_tools: list[dict], system_prompt: 
     seen_calls: set[tuple[str, str]] = set()
 
     for _ in range(MAX_TURNS):
-        response = await observability.call_gemini(contents, tools, system_prompt)
+        response = observability.call_gemini(contents, tools, system_prompt)
         calls = response.function_calls or []
         if not calls:
             if not response.text:
