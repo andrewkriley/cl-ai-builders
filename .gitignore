@@ -1,6 +1,7 @@
 # Secrets / local config
 .env
 .mcp.json
+.claude/
 
 # Python
 __pycache__/

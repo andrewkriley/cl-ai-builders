@@ -41,16 +41,37 @@ OPENAI_MODEL = "gpt-4o"
 ANTHROPIC_MODEL = "claude-sonnet-5"
 GEMINI_MODEL = "gemini-3.6-flash"
 
+# KNOWN ISSUE (unresolved): in a real multi-round tool-calling conversation,
+# most (not all) `llm` spans for a worker silently never reach Galileo —
+# verified repeatedly against the real backend: a 4-6 round conversation
+# typically ends up with only 1 surviving `llm` span, while every `tool`
+# span and the trace's own input/output are unaffected. Investigated over
+# many controlled reproductions (bounding logged payload size, switching to
+# each provider's async client, flushing after every span instead of once
+# at the end, mode="distributed" instead of the default "batch") — none of
+# them fixed it, and several fabricated-data repros using the exact same
+# code path never reproduced it at all, so the precise trigger is still
+# unknown. `_MAX_LOGGED_TURNS` below bounds what gets logged per span
+# regardless, since a growing multi-round payload is bad practice on its
+# own merits even though it turned out not to be the cause here — the full
+# conversation is reconstructable from the sequence of spans in the trace.
+# If you hit this, it's not something wrong with your setup.
+_MAX_LOGGED_TURNS = 6
 
-def call_openai(messages: list[dict], tools: list[dict], system_prompt: str):
+
+async def call_openai(messages: list[dict], tools: list[dict], system_prompt: str):
     from galileo.openai import openai  # auto-logs every call, no decorator needed
 
-    client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    # AsyncOpenAI, not the sync client: avoiding a long blocking call inside
+    # an async function is good practice regardless (doesn't stall other
+    # work on the event loop) — see the KNOWN ISSUE comment above though,
+    # this alone did not turn out to fix the missing-llm-span problem.
+    client = openai.AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
     full_messages = [{"role": "system", "content": system_prompt}, *messages]
     # `name` is captured by Galileo's wrapper for the span label and stripped
     # before the real API call — it's not forwarded to OpenAI. The wrapper
     # already reads `model` from these same kwargs for the span's model field.
-    return client.chat.completions.create(
+    return await client.chat.completions.create(
         model=OPENAI_MODEL, messages=full_messages, tools=tools or None, name="openai"
     )
 
@@ -77,12 +98,12 @@ def _anthropic_content_to_log(blocks) -> str:
     return "\n".join(parts)
 
 
-def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
-    from anthropic import Anthropic
+async def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
+    from anthropic import AsyncAnthropic
 
-    client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])  # see call_openai's comment on why async
     start = time.time()
-    response = client.messages.create(
+    response = await client.messages.create(
         model=ANTHROPIC_MODEL,
         max_tokens=1024,
         system=system_prompt,
@@ -95,9 +116,10 @@ def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
     # big stringified dict of every function argument (including
     # system_prompt as a stray key, not as part of the conversation) rather
     # than a clean message list, since it doesn't know Anthropic keeps
-    # `system` separate from `messages`.
+    # `system` separate from `messages`. The real API call above still gets
+    # the full `messages` history; only the logged copy is bounded.
     galileo_context.get_logger_instance().add_llm_span(
-        input=[{"role": "system", "content": system_prompt}, *messages],
+        input=[{"role": "system", "content": system_prompt}, *messages[-_MAX_LOGGED_TURNS:]],
         output=_anthropic_content_to_log(response.content),
         model=ANTHROPIC_MODEL,
         name="anthropic",
@@ -131,17 +153,17 @@ def _gemini_content_text(content) -> str:
     return "\n".join(_gemini_part_to_text(part) for part in content.parts)
 
 
-def call_gemini(contents: list, tools: list[dict], system_prompt: str):
+async def call_gemini(contents: list, tools: list[dict], system_prompt: str):
     from google import genai
     from google.genai import types
 
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])  # client.aio used below — see call_openai's comment on why async
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         tools=[types.Tool(function_declarations=tools)] if tools else None,
     )
     start = time.time()
-    response = client.models.generate_content(model=GEMINI_MODEL, contents=contents, config=config)
+    response = await client.aio.models.generate_content(model=GEMINI_MODEL, contents=contents, config=config)
 
     # Same reasoning as call_anthropic: log by hand so system_prompt shows up
     # as part of the conversation (Gemini keeps it out of `contents` too) and
@@ -150,11 +172,13 @@ def call_gemini(contents: list, tools: list[dict], system_prompt: str):
     # role Galileo recognizes (verified: that entry alone got wrapped and
     # re-stringified, role silently defaulted to "user") — mapped to the
     # conventional "assistant" here.
+    # The real API call above gets the full `contents` history; only the
+    # logged copy is bounded (see _MAX_LOGGED_TURNS comment above).
     logged_input = [
         {"role": "system", "content": system_prompt},
         *[
             {"role": "assistant" if c.role == "model" else c.role, "content": _gemini_content_text(c)}
-            for c in contents
+            for c in contents[-_MAX_LOGGED_TURNS:]
         ],
     ]
     logged_output = _gemini_content_text(response.candidates[0].content) if response.candidates else (response.text or "")

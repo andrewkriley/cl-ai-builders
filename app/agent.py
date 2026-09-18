@@ -1,13 +1,17 @@
-"""Supervisor -> classifier -> scoped worker: the agent structure for one chat turn.
+"""Supervisor -> classifier -> scoped worker(s): the agent structure for one chat turn.
 
 For each turn: a "supervisor" agent span wraps the whole thing. Inside it, a
 "classifier" agent span (a fast keyword heuristic, not an LLM call — keeps
-this deterministic and free of extra API cost/latency) picks a category
-(security/infra/general), which selects a scoped system prompt and tool
-subset. A "react" agent span then wraps the actual provider-specific
-tool-calling loop for that category. In Galileo this renders as:
+this deterministic and free of extra API cost/latency) picks one or more
+categories (security/infra/general) — a prompt can touch more than one, e.g.
+"compare security notables with PDU power draw". Each matched category gets
+its own "react" worker agent span with a scoped system prompt and tool
+subset. If more than one category matched, a final synthesis LLM call (no
+tools) combines the workers' findings into one answer; with just one
+category, that worker's own answer is returned directly, no extra call. In
+Galileo this renders as:
 
-    trace -> agent(supervisor) -> [agent(classifier), agent(react) -> [llm, tool, llm, ...]]
+    trace -> agent(supervisor) -> [agent(classifier), agent(react) -> [llm, tool, ...], agent(react) -> [...], llm(synthesis)?]
 
 Each loop repeats: call the LLM with the tools on offer -> if it asks for a
 tool call, run it via observability.call_splunk_tool (a Galileo `tool`
@@ -21,11 +25,15 @@ Either one tripping sets status_code=1 on the worker's agent span when it
 concludes, so a stuck turn is visible/filterable in Galileo rather than
 just a silent fallback message in the chat.
 
-The LLM calls run synchronously in-line (not via asyncio.to_thread) on
-purpose: Galileo's logger lookup resolves to a different object with no
-active trace inside a to_thread-spawned worker thread, which silently drops
-every LLM span from the trace. Blocking the event loop briefly is an
-acceptable tradeoff for this single-user workshop demo.
+The LLM calls use each provider's async client (AsyncAnthropic/AsyncOpenAI/
+`.aio`), awaited in-line rather than run via asyncio.to_thread — the latter
+is confirmed broken: it resolves Galileo's logger to a different object
+with no active trace, silently dropping every LLM span. See the KNOWN ISSUE
+comment in observability.py: even with the async client, a real multi-round
+conversation still tends to lose most (not all) `llm` spans in Galileo —
+every `tool` span and the trace's own input/output are unaffected, and this
+has not been root-caused despite extensive investigation. It's an
+observability gap only; the chat app's answers are correct regardless.
 """
 
 import json
@@ -75,6 +83,13 @@ sample data). Use whichever fits the question."""
 
 CATEGORY_PROMPTS = {"security": SECURITY_SYSTEM_PROMPT, "infra": INFRA_SYSTEM_PROMPT, "general": GENERAL_SYSTEM_PROMPT}
 
+SYNTHESIS_SYSTEM_PROMPT = """\
+You are combining findings from multiple specialized Splunk sub-agents into \
+one clear, unified answer for the user. Each sub-agent already gathered \
+real data for its part of the question — do not call any tools, just \
+synthesize their findings into a single well-organized answer that directly \
+addresses the user's original question."""
+
 # saia_* tools call a separate Splunk AI Assistant backend that reliably
 # returns server errors on this instance (confirmed) — never offered.
 EXCLUDED_TOOLS = {"saia_generate_spl", "saia_explain_spl", "saia_ask_splunk_question", "saia_optimize_spl"}
@@ -96,13 +111,14 @@ INFRA_KEYWORDS = [
 
 
 @log(span_type="agent", name="classifier", params={"agent_type": "classifier"})
-def _classify(user_message: str) -> str:
+def _classify(user_message: str) -> list[str]:
     text = user_message.lower()
+    categories = []
     if any(keyword in text for keyword in SECURITY_KEYWORDS):
-        return "security"
+        categories.append("security")
     if any(keyword in text for keyword in INFRA_KEYWORDS):
-        return "infra"
-    return "general"
+        categories.append("infra")
+    return categories or ["general"]
 
 
 def _scoped_tools(mcp_tools: list[dict], category: str) -> list[dict]:
@@ -110,13 +126,8 @@ def _scoped_tools(mcp_tools: list[dict], category: str) -> list[dict]:
     return [t for t in mcp_tools if t["name"] not in EXCLUDED_TOOLS and (allowed is None or t["name"] in allowed)]
 
 
-async def run_agent_turn(user_message: str, mcp_tools: list[dict], provider: str | None = None) -> str:
-    provider = provider or os.environ.get("LLM_PROVIDER", "anthropic")
+async def _run_worker(user_message: str, mcp_tools: list[dict], provider: str, category: str) -> tuple[str, int]:
     logger = galileo_context.get_logger_instance()
-
-    logger.add_agent_span(input=user_message, name="supervisor", agent_type="supervisor")
-
-    category = _classify(user_message)
     system_prompt = CATEGORY_PROMPTS[category]
     scoped_tools = _scoped_tools(mcp_tools, category)
 
@@ -127,10 +138,49 @@ async def run_agent_turn(user_message: str, mcp_tools: list[dict], provider: str
         result, status_code = await _gemini_loop(user_message, scoped_tools, system_prompt)
     else:
         result, status_code = await _anthropic_loop(user_message, scoped_tools, system_prompt)
-    logger.conclude(output=result, status_code=status_code)  # closes the worker span
+    logger.conclude(output=result, status_code=status_code)  # closes this worker span
+    return result, status_code
 
-    logger.conclude(output=result, status_code=status_code)  # closes the supervisor span
-    return result
+
+async def run_agent_turn(user_message: str, mcp_tools: list[dict], provider: str | None = None) -> str:
+    provider = provider or os.environ.get("LLM_PROVIDER", "anthropic")
+    logger = galileo_context.get_logger_instance()
+
+    logger.add_agent_span(input=user_message, name="supervisor", agent_type="supervisor")
+
+    categories = _classify(user_message)
+
+    worker_results: dict[str, str] = {}
+    worst_status = 0
+    for category in categories:
+        result, status_code = await _run_worker(user_message, mcp_tools, provider, category)
+        worker_results[category] = result
+        worst_status = max(worst_status, status_code)
+
+    if len(worker_results) == 1:
+        final = next(iter(worker_results.values()))
+    else:
+        final = await _synthesize(user_message, worker_results, provider)
+
+    logger.conclude(output=final, status_code=worst_status)  # closes the supervisor span
+    return final
+
+
+async def _synthesize(user_message: str, worker_results: dict[str, str], provider: str) -> str:
+    findings = "\n\n".join(f"## {category.title()} findings\n{text}" for category, text in worker_results.items())
+    prompt = f"Original question: {user_message}\n\n{findings}"
+
+    if provider == "openai":
+        response = await observability.call_openai([{"role": "user", "content": prompt}], [], SYNTHESIS_SYSTEM_PROMPT)
+        return response.choices[0].message.content or findings
+    if provider == "gemini":
+        from google.genai import types
+
+        contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
+        response = await observability.call_gemini(contents, [], SYNTHESIS_SYSTEM_PROMPT)
+        return response.text or findings
+    response = await observability.call_anthropic([{"role": "user", "content": prompt}], [], SYNTHESIS_SYSTEM_PROMPT)
+    return "".join(block.text for block in response.content if block.type == "text") or findings
 
 
 async def _openai_loop(user_message: str, mcp_tools: list[dict], system_prompt: str) -> tuple[str, int]:
@@ -142,7 +192,7 @@ async def _openai_loop(user_message: str, mcp_tools: list[dict], system_prompt: 
     seen_calls: set[tuple[str, str]] = set()
 
     for _ in range(MAX_TURNS):
-        response = observability.call_openai(messages, tools, system_prompt)
+        response = await observability.call_openai(messages, tools, system_prompt)
         message = response.choices[0].message
         if not message.tool_calls:
             return message.content or "", 0
@@ -167,7 +217,7 @@ async def _anthropic_loop(user_message: str, mcp_tools: list[dict], system_promp
     seen_calls: set[tuple[str, str]] = set()
 
     for _ in range(MAX_TURNS):
-        response = observability.call_anthropic(messages, tools, system_prompt)
+        response = await observability.call_anthropic(messages, tools, system_prompt)
         tool_uses = [block for block in response.content if block.type == "tool_use"]
         if not tool_uses:
             return "".join(block.text for block in response.content if block.type == "text"), 0
@@ -197,7 +247,7 @@ async def _gemini_loop(user_message: str, mcp_tools: list[dict], system_prompt: 
     seen_calls: set[tuple[str, str]] = set()
 
     for _ in range(MAX_TURNS):
-        response = observability.call_gemini(contents, tools, system_prompt)
+        response = await observability.call_gemini(contents, tools, system_prompt)
         calls = response.function_calls or []
         if not calls:
             return response.text or "", 0

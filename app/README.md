@@ -63,10 +63,24 @@ it connects directly.
   turn is visible/filterable in Galileo instead of just a silent fallback
   message in the chat.
 
-  The LLM calls run in-line rather than via `asyncio.to_thread` — Galileo's
-  logger lookup silently loses the active trace inside a thread-pool worker,
-  so this briefly blocks the event loop as a deliberate tradeoff for a
-  single-user demo.
+  The LLM calls use each provider's async client (`AsyncAnthropic`/
+  `AsyncOpenAI`/`.aio`), awaited in-line rather than run via
+  `asyncio.to_thread` — that's confirmed broken: it resolves Galileo's
+  logger to a different object with no active trace, silently dropping
+  every LLM span.
+
+  **Known unresolved issue:** even with the async client, a real multi-round
+  conversation still tends to lose most (not all) `llm` spans in Galileo —
+  every `tool` span and the trace's own input/output are unaffected, and
+  this is purely an observability gap, not a functional bug (the chat
+  app's answers are correct regardless). Extensively investigated —
+  bounding the logged payload size, switching sync→async clients, flushing
+  after every span instead of once at the end, and `mode="distributed"`
+  were all tried and none fixed it, while several fabricated-data
+  reproductions using the identical code path never reproduced it at all.
+  See the `KNOWN ISSUE` comment in `observability.py` for the full trail. If
+  you see this during the workshop, it's not something wrong with your
+  setup.
 - **`observability.py`** — OpenAI calls go through Galileo's native
   `galileo.openai` wrapper (auto-logs, no decorator needed), passing
   `name="openai"` so its spans are labeled by provider instead of the

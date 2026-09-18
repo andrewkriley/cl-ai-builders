@@ -231,3 +231,12 @@ client, Galileo tracing, chat UI).
   workshop — traces, spans, and sessions all log and display correctly;
   only the auto-computed quality scores are affected. If it matters for your
   session, check Galileo's status page or contact their support.
+- **A multi-round conversation's trace is missing some of its `llm` spans**
+  (tool spans and the trace's own input/output all look correct, just some
+  LLM calls in the middle are absent) — a known, unresolved issue, not
+  something wrong with your setup. Extensively investigated (see the
+  `KNOWN ISSUE` comment in `app/observability.py`): bounding logged payload
+  size, switching to each provider's async client, flushing after every
+  span instead of once at the end, and `mode="distributed"` were all tried
+  and none fixed it. Purely a Galileo observability gap — the chat app's
+  answers remain correct regardless.
