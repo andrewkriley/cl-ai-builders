@@ -48,11 +48,21 @@ it connects directly.
   `name="openai"` so its spans are labeled by provider instead of the
   wrapper's generic default (`"llm"`) — that kwarg is captured by Galileo
   for the span label and stripped before the real API call, never sent to
-  OpenAI. Anthropic and Gemini calls, and every Splunk MCP tool call, use
-  Galileo's `@log(span_type=..., name=...)` decorator instead, since no
-  native wrapper exists for those — `name="anthropic"`/`name="gemini"` for
-  the same reason (otherwise `@log` defaults the span name to the Python
-  function name, e.g. `call_anthropic`). `run_traced_turn` maps each
+  OpenAI. Anthropic and Gemini calls build their span by hand via
+  `GalileoLogger.add_llm_span(...)` instead of the generic
+  `@log(span_type="llm")` decorator — `@log` auto-captures *every* function
+  argument as the input (including `system_prompt` as a stray key, since it
+  doesn't know Anthropic/Gemini keep the system prompt separate from the
+  conversation) and re-stringifies structured outputs it doesn't recognize
+  (verified: a response with an Anthropic `thinking` block fell back to a
+  raw JSON blob instead of readable text). Calling `add_llm_span` directly
+  gives full control: `input` is a clean `[{"role": "system", ...}, ...]`
+  list matching OpenAI's shape, `output` is flattened to readable text, and
+  `tools`/token counts/duration are passed explicitly (the `tools` list
+  matters — without it, Galileo's `tool_selection_quality` metric can't run
+  and reports "not applicable"). Every Splunk MCP tool call still uses
+  `@log(span_type="tool")`, which doesn't have this problem since its
+  input/output are already simple strings. `run_traced_turn` maps each
   `conversation_id` to a Galileo session (created once via `start_session`,
   cached), explicitly calls `start_trace(input=user_message)` /
   `conclude(output=result)` so the trace shows the real question and answer

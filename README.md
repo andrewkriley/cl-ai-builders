@@ -33,9 +33,12 @@ A small web app with a chat interface, backed by an AI agent that:
 ```
 
 Galileo only ships a native wrapper for OpenAI (`galileo.openai`, drop-in,
-auto-logs every call). Anthropic and Gemini calls — and Splunk MCP tool
-calls — use Galileo's `@log` decorator instead, which produces the same kind
-of trace without a provider-specific wrapper.
+auto-logs every call). Anthropic and Gemini calls build their span by hand
+via `GalileoLogger.add_llm_span(...)` for full control over what gets
+logged — the generic `@log` decorator dumps every function argument
+(including the system prompt) as a stray field instead of a clean message
+list, and mangles response types it doesn't recognize. Splunk MCP tool
+calls still use `@log(span_type="tool")`, which doesn't have that problem.
 
 A working reference app ships in [`app/`](./app) (`uvicorn app.main:app
 --reload`) so everyone has something running by the end of the session. If

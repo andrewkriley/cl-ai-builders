@@ -2,13 +2,20 @@
 
 Galileo only ships a native import-swap wrapper for OpenAI (`galileo.openai`)
 — it auto-logs every call, no decorator needed. Anthropic and Gemini have no
-such wrapper, so those calls use Galileo's `@log` decorator instead, which
-creates the same kind of span manually. Splunk MCP tool calls use
-`@log(span_type="tool")` the same way. The whole turn is wrapped in one
-`galileo_context` so every LLM/tool span lands in a single trace.
+such wrapper, so those calls build their span by hand via
+`GalileoLogger.add_llm_span(...)` — not the `@log(span_type="llm")`
+decorator, which generically dumps every function argument (including
+`system_prompt` as a stray key, and provider-specific response shapes like
+Anthropic's `thinking` blocks) into the span rather than a clean message
+list. Splunk MCP tool calls still use `@log(span_type="tool")`, which
+doesn't have this problem — its input/output are already simple. The whole
+turn is wrapped in one `galileo_context` so every LLM/tool span lands in a
+single trace.
 """
 
+import json
 import os
+import time
 
 from galileo import galileo_context, log, start_session
 
@@ -48,15 +55,34 @@ def call_openai(messages: list[dict], tools: list[dict], system_prompt: str):
     )
 
 
-# @log(span_type="llm") leaves the span's model field blank unless told
-# otherwise — `params={"model": ...}` is how you supply it (the OpenAI
-# wrapper above gets this for free from its own call kwargs).
-@log(span_type="llm", name="anthropic", params={"model": ANTHROPIC_MODEL})
+def _anthropic_content_to_log(blocks) -> str:
+    """Flatten Anthropic content blocks (text/tool_use/thinking) into readable text.
+
+    @log(span_type="llm")'s generic argument/return-value capture doesn't
+    understand Anthropic's block types — a response with a `thinking` block
+    fell back to a raw stringified blob instead of a readable message
+    (verified against real Galileo trace data). add_llm_span's `output` only
+    renders cleanly as a plain string — passing a dict with a list `content`
+    gets silently re-stringified inside a wrapper instead of displayed, so
+    this returns text, not a structured value.
+    """
+    parts = []
+    for block in blocks:
+        if block.type == "text":
+            parts.append(block.text)
+        elif block.type == "tool_use":
+            parts.append(f"[tool_use: {block.name}({json.dumps(block.input)})]")
+        elif block.type == "thinking" and block.thinking:
+            parts.append(f"[thinking: {block.thinking}]")
+    return "\n".join(parts)
+
+
 def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
     from anthropic import Anthropic
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    return client.messages.create(
+    start = time.time()
+    response = client.messages.create(
         model=ANTHROPIC_MODEL,
         max_tokens=1024,
         system=system_prompt,
@@ -64,8 +90,54 @@ def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
         tools=tools or [],
     )
 
+    # Logged by hand via add_llm_span (the same primitive @log calls
+    # internally) instead of @log(span_type="llm"): that gave input as one
+    # big stringified dict of every function argument (including
+    # system_prompt as a stray key, not as part of the conversation) rather
+    # than a clean message list, since it doesn't know Anthropic keeps
+    # `system` separate from `messages`.
+    galileo_context.get_logger_instance().add_llm_span(
+        input=[{"role": "system", "content": system_prompt}, *messages],
+        output=_anthropic_content_to_log(response.content),
+        model=ANTHROPIC_MODEL,
+        name="anthropic",
+        tools=tools or None,
+        num_input_tokens=response.usage.input_tokens,
+        num_output_tokens=response.usage.output_tokens,
+        duration_ns=int((time.time() - start) * 1e9),
+    )
+    return response
 
-@log(span_type="llm", name="gemini", params={"model": GEMINI_MODEL})
+
+def _gemini_part_to_log(part) -> dict:
+    if part.text is not None:
+        return {"text": part.text}
+    if part.function_call is not None:
+        return {"function_call": {"name": part.function_call.name, "args": part.function_call.args}}
+    if part.function_response is not None:
+        return {"function_response": {"name": part.function_response.name, "response": part.function_response.response}}
+    return {"raw": str(part)}
+
+
+def _gemini_content_to_log(content) -> dict:
+    return {"role": content.role, "parts": [_gemini_part_to_log(p) for p in content.parts]}
+
+
+def _gemini_output_text(content) -> str:
+    # add_llm_span's `output` only renders cleanly as a plain string — a
+    # dict with a list `parts` gets silently re-stringified instead of
+    # displayed, same issue as Anthropic's content blocks.
+    if content is None:
+        return ""
+    parts = []
+    for part in content.parts:
+        if part.text is not None:
+            parts.append(part.text)
+        elif part.function_call is not None:
+            parts.append(f"[function_call: {part.function_call.name}({json.dumps(dict(part.function_call.args or {}))})]")
+    return "\n".join(parts)
+
+
 def call_gemini(contents: list, tools: list[dict], system_prompt: str):
     from google import genai
     from google.genai import types
@@ -75,7 +147,27 @@ def call_gemini(contents: list, tools: list[dict], system_prompt: str):
         system_instruction=system_prompt,
         tools=[types.Tool(function_declarations=tools)] if tools else None,
     )
-    return client.models.generate_content(model=GEMINI_MODEL, contents=contents, config=config)
+    start = time.time()
+    response = client.models.generate_content(model=GEMINI_MODEL, contents=contents, config=config)
+
+    # Same reasoning as call_anthropic: log by hand so system_prompt shows up
+    # as part of the conversation (Gemini keeps it out of `contents` too) and
+    # so the response renders as text/function-call parts instead of an
+    # opaque blob.
+    logged_input = [{"role": "system", "parts": [{"text": system_prompt}]}, *[_gemini_content_to_log(c) for c in contents]]
+    logged_output = _gemini_output_text(response.candidates[0].content) if response.candidates else (response.text or "")
+    usage = response.usage_metadata
+    galileo_context.get_logger_instance().add_llm_span(
+        input=logged_input,
+        output=logged_output,
+        model=GEMINI_MODEL,
+        name="gemini",
+        tools=tools or None,
+        num_input_tokens=usage.prompt_token_count if usage else None,
+        num_output_tokens=usage.candidates_token_count if usage else None,
+        duration_ns=int((time.time() - start) * 1e9),
+    )
+    return response
 
 
 @log(span_type="tool")
