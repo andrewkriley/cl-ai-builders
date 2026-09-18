@@ -109,33 +109,26 @@ def call_anthropic(messages: list[dict], tools: list[dict], system_prompt: str):
     return response
 
 
-def _gemini_part_to_log(part) -> dict:
+def _gemini_part_to_text(part) -> str:
     if part.text is not None:
-        return {"text": part.text}
+        return part.text
     if part.function_call is not None:
-        return {"function_call": {"name": part.function_call.name, "args": part.function_call.args}}
+        return f"[function_call: {part.function_call.name}({json.dumps(dict(part.function_call.args or {}))})]"
     if part.function_response is not None:
-        return {"function_response": {"name": part.function_response.name, "response": part.function_response.response}}
-    return {"raw": str(part)}
+        return f"[function_response: {part.function_response.name} -> {json.dumps(dict(part.function_response.response or {}))}]"
+    return f"[{type(part).__name__}]"
 
 
-def _gemini_content_to_log(content) -> dict:
-    return {"role": content.role, "parts": [_gemini_part_to_log(p) for p in content.parts]}
-
-
-def _gemini_output_text(content) -> str:
-    # add_llm_span's `output` only renders cleanly as a plain string — a
-    # dict with a list `parts` gets silently re-stringified instead of
-    # displayed, same issue as Anthropic's content blocks.
+def _gemini_content_text(content) -> str:
+    # add_llm_span's message-list schema wants {"role": ..., "content": <str>}
+    # per entry — verified against real Galileo data that {"role": ...,
+    # "parts": [...]} isn't recognized: every entry's role silently collapsed
+    # to "user" and the whole dict got re-stringified into a "content" field
+    # instead of being displayed. Flattening parts to text up front avoids
+    # that entirely, for both input entries and the final output.
     if content is None:
         return ""
-    parts = []
-    for part in content.parts:
-        if part.text is not None:
-            parts.append(part.text)
-        elif part.function_call is not None:
-            parts.append(f"[function_call: {part.function_call.name}({json.dumps(dict(part.function_call.args or {}))})]")
-    return "\n".join(parts)
+    return "\n".join(_gemini_part_to_text(part) for part in content.parts)
 
 
 def call_gemini(contents: list, tools: list[dict], system_prompt: str):
@@ -153,9 +146,18 @@ def call_gemini(contents: list, tools: list[dict], system_prompt: str):
     # Same reasoning as call_anthropic: log by hand so system_prompt shows up
     # as part of the conversation (Gemini keeps it out of `contents` too) and
     # so the response renders as text/function-call parts instead of an
-    # opaque blob.
-    logged_input = [{"role": "system", "parts": [{"text": system_prompt}]}, *[_gemini_content_to_log(c) for c in contents]]
-    logged_output = _gemini_output_text(response.candidates[0].content) if response.candidates else (response.text or "")
+    # opaque blob. Gemini's own role name for its turns is "model" — not a
+    # role Galileo recognizes (verified: that entry alone got wrapped and
+    # re-stringified, role silently defaulted to "user") — mapped to the
+    # conventional "assistant" here.
+    logged_input = [
+        {"role": "system", "content": system_prompt},
+        *[
+            {"role": "assistant" if c.role == "model" else c.role, "content": _gemini_content_text(c)}
+            for c in contents
+        ],
+    ]
+    logged_output = _gemini_content_text(response.candidates[0].content) if response.candidates else (response.text or "")
     usage = response.usage_metadata
     galileo_context.get_logger_instance().add_llm_span(
         input=logged_input,
