@@ -195,7 +195,9 @@ async def _openai_loop(user_message: str, mcp_tools: list[dict], system_prompt: 
         response = await observability.call_openai(messages, tools, system_prompt)
         message = response.choices[0].message
         if not message.tool_calls:
-            return message.content or "", 0
+            if not message.content:
+                return _empty_answer_message(), 1
+            return message.content, 0
 
         messages.append(message.model_dump(exclude_unset=True))
         for tool_call in message.tool_calls:
@@ -220,7 +222,10 @@ async def _anthropic_loop(user_message: str, mcp_tools: list[dict], system_promp
         response = await observability.call_anthropic(messages, tools, system_prompt)
         tool_uses = [block for block in response.content if block.type == "tool_use"]
         if not tool_uses:
-            return "".join(block.text for block in response.content if block.type == "text"), 0
+            text = "".join(block.text for block in response.content if block.type == "text")
+            if not text:
+                return _empty_answer_message(), 1
+            return text, 0
 
         messages.append({"role": "assistant", "content": response.content})
         tool_results = []
@@ -250,7 +255,9 @@ async def _gemini_loop(user_message: str, mcp_tools: list[dict], system_prompt: 
         response = await observability.call_gemini(contents, tools, system_prompt)
         calls = response.function_calls or []
         if not calls:
-            return response.text or "", 0
+            if not response.text:
+                return _empty_answer_message(), 1
+            return response.text, 0
 
         contents.append(response.candidates[0].content)
         result_parts = []
@@ -266,6 +273,13 @@ async def _gemini_loop(user_message: str, mcp_tools: list[dict], system_prompt: 
         contents.append(types.Content(role="user", parts=result_parts))
 
     return _turn_limit_message(), 1
+
+
+def _empty_answer_message() -> str:
+    return (
+        "The model finished without producing a final answer — this can happen on a demanding "
+        "question if it runs out of response budget. Try asking again or narrowing the question."
+    )
 
 
 def _repeated_call_message(tool_name: str) -> str:

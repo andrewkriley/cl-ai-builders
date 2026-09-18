@@ -105,7 +105,13 @@ async def call_anthropic(messages: list[dict], tools: list[dict], system_prompt:
     start = time.time()
     response = await client.messages.create(
         model=ANTHROPIC_MODEL,
-        max_tokens=1024,
+        # 1024 was too tight: found a real case where a worker's final round
+        # (no tool_use, should be the answer text) came back completely
+        # empty on a demanding synthesis-style question, which fed an empty
+        # string into that worker's result. Sonnet 5's own reasoning before
+        # answering can eat into a small budget before any visible text is
+        # emitted; 4096 gives real headroom.
+        max_tokens=4096,
         system=system_prompt,
         messages=messages,
         tools=tools or [],
