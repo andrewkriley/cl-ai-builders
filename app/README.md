@@ -31,14 +31,38 @@ it connects directly.
   how that URL is derived) using the `mcp` Python SDK, authenticating with
   `SPLUNK_MCP_TOKEN`. Splunk's management port uses a self-signed cert by
   default, so TLS verification is disabled for this one connection.
-- **`agent.py`** — one tool-calling loop per `LLM_PROVIDER`
-  (anthropic/openai/gemini): call the LLM with the Splunk MCP tools on offer,
-  execute whatever tool call it asks for, feed the result back, repeat until
-  it returns a final answer (capped at 8 rounds — `oidemo_notable` is
-  `sourcetype=stash`, where `severity` is embedded as literal uppercase text
-  like `severity=HIGH` rather than a normalized field, so the model
-  sometimes needs a few rounds to rediscover the right query shape; the
-  system prompt now warns it up front, but the cap has headroom regardless).
+- **`agent.py`** — a supervisor/classifier/worker structure, not just a flat
+  loop:
+  - A **supervisor** agent span (`agent_type="supervisor"`) wraps the whole
+    turn.
+  - A **classifier** agent span (`agent_type="classifier"`) inside it picks
+    a category — `security`, `infra`, or `general` — via a fast keyword
+    heuristic (not an LLM call, to keep this deterministic and free of
+    extra API cost/latency). That category selects a scoped system prompt
+    (e.g. the security prompt knows `oidemo_notable` is `sourcetype=stash`
+    with `severity` embedded as literal uppercase text like `severity=HIGH`,
+    not a normalized field) and a scoped tool subset — the `saia_*` tools
+    are excluded from every category, since they reliably return server
+    errors on this instance (confirmed).
+  - A **worker** agent span (`agent_type="react"`) then runs the actual
+    tool-calling loop for `LLM_PROVIDER` (anthropic/openai/gemini) with that
+    scoped prompt/tools: call the LLM, execute whatever tool call it asks
+    for, feed the result back, repeat until it returns a final answer.
+
+  In Galileo this renders as `trace -> agent(supervisor) ->
+  [agent(classifier), agent(react) -> [llm, tool, llm, ...]]` (verified
+  against the real backend).
+
+  Two independent safety nets inside each worker loop, since a real LLM can
+  get stuck: `MAX_TURNS` caps the round count (8), and a repeated-call guard
+  stops immediately if the model calls the exact same tool with the exact
+  same arguments twice in a row — a common real loop failure mode, faster to
+  catch than waiting for the cap (verified with mocked responses: trips
+  after exactly 2 calls, not 8). Either one tripping sets `status_code=1` on
+  the worker's (and supervisor's) agent span when it concludes, so a stuck
+  turn is visible/filterable in Galileo instead of just a silent fallback
+  message in the chat.
+
   The LLM calls run in-line rather than via `asyncio.to_thread` — Galileo's
   logger lookup silently loses the active trace inside a thread-pool worker,
   so this briefly blocks the event loop as a deliberate tradeoff for a

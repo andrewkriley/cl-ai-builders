@@ -9,27 +9,36 @@ agent observability signals to [Galileo](https://app.galileo.ai).
 A small web app with a chat interface, backed by an AI agent that:
 
 1. Takes a user's question in the chat UI.
-2. Calls an LLM API (Anthropic, OpenAI, or Gemini — your own key) to reason
-   about the question. A dropdown in the chat UI switches between whichever
-   of the three you have a key for, per turn.
-3. Lets the LLM call tools exposed by a **Splunk MCP server** to query your
-   Splunk instance for the data it needs.
-4. Traces each turn (prompts, tool calls, responses) to **Galileo** for
-   agent observability — every turn in one browser conversation is grouped
-   under a single Galileo session, so a full back-and-forth shows up as one
-   session containing multiple traces, each with its LLM and tool spans.
+2. Classifies the question (security / infra / general — a fast keyword
+   heuristic, no extra LLM call) and hands it to a scoped worker agent with
+   a matching system prompt and tool subset.
+3. That worker calls an LLM API (Anthropic, OpenAI, or Gemini — your own
+   key) to reason about the question. A dropdown in the chat UI switches
+   between whichever of the three you have a key for, per turn.
+4. Lets the LLM call tools exposed by a **Splunk MCP server** to query your
+   Splunk instance for the data it needs, with two safety nets against a
+   stuck agent: a round cap, and a guard that stops on a repeated identical
+   tool call.
+5. Traces each turn (prompts, tool calls, responses) to **Galileo** for
+   agent observability, structured as `supervisor → [classifier, worker →
+   [llm, tool, ...]]` agent spans — every turn in one browser conversation
+   is grouped under a single Galileo session, so a full back-and-forth
+   shows up as one session containing multiple traces.
 
 ```
  Browser (chat UI)
        │
        ▼
-   FastAPI app ──► LLM API (Anthropic / OpenAI / Gemini, your key)
-       │                     │
-       │                     ▼ (tool calls)
-       └───────────► Splunk MCP server ──► your Splunk instance
+   FastAPI app ──► supervisor agent ──► classifier agent (picks a category)
+       │                 │
+       │                 ▼
+       │           worker agent ──► LLM API (Anthropic / OpenAI / Gemini)
+       │                 │                     │
+       │                 │                     ▼ (tool calls)
+       │                 └───────────► Splunk MCP server ──► your Splunk instance
        │
        ▼
-    Galileo (trace of the agent's turn)
+    Galileo (nested trace: supervisor → classifier + worker → llm/tool spans)
 ```
 
 Galileo only ships a native wrapper for OpenAI (`galileo.openai`, drop-in,
